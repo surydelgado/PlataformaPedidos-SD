@@ -4,6 +4,7 @@ import {randomUUID} from "node:crypto"; //Para generar valores aleatorios
 import {contarPrimos} from "./calculo";
 import{Worker} from "node:worker_threads";
 import path from "node:path";
+import {medirLatencia, resumenMetricas} from "./metricas";
 
 const PORT = Number(process.env.PORT ?? 3000);
 const INVENTARIO_URL = process.env.INVENTARIO_URL ?? "http://localhost:3001";
@@ -22,10 +23,15 @@ const app = express();
 
 app.disable("x-powered-by");
 app.use(express.json());
+app.use(medirLatencia);
 
 // Consulta Salud del Servicio
 app.get("/health", (_req: Request, res: Response) => {
     res.json({status: "ok", servicio: "Pedidos"});
+});
+
+app.get("/metricas", (_req: Request, res: Response) => {
+    res.json(resumenMetricas());
 });
 
 // Comprobar si Pedidos está listo
@@ -162,10 +168,10 @@ function contarPrimosenWorker(n: number): Promise<number> {
     });
 }
 
-app.get("/reporte/worker", (req: Request, res: Response) => {
+app.get("/reporte/worker", async (req: Request, res: Response) => {
     const n = leerN(req);
     const inicio = performance.now();
-    const primos = contarPrimosenWorker(n);
+    const primos = await contarPrimosenWorker(n);
     const duracionMs = Math.round(performance.now() - inicio);
     res.json({modo : "worker", n, primos, duracionMs});
 });
