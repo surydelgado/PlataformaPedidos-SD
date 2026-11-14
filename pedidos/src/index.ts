@@ -5,6 +5,7 @@ import {contarPrimos} from "./calculo";
 import{Worker} from "node:worker_threads";
 import path from "node:path";
 import {medirLatencia, resumenMetricas} from "./metricas";
+import {contarPrimosEnPool, estadoPool} from "./pool";
 
 const PORT = Number(process.env.PORT ?? 3000);
 const INVENTARIO_URL = process.env.INVENTARIO_URL ?? "http://localhost:3001";
@@ -31,7 +32,10 @@ app.get("/health", (_req: Request, res: Response) => {
 });
 
 app.get("/metricas", (_req: Request, res: Response) => {
-    res.json(resumenMetricas());
+    res.json({
+        ...resumenMetricas(),
+        pool: estadoPool()
+    });
 });
 
 // Comprobar si Pedidos está listo
@@ -142,7 +146,7 @@ app.post("/pedidos", async (req: Request, res: Response) => {
     }
 });
 
-//Funcion Leer Primos 
+//Funcion Leer Primos
 function leerN(req: Request): number {
     const n = Number(req.query.n ?? REPORTE_N);
     return Number.isInteger(n) && n > 0 && n<= 50_000_000 ? n : REPORTE_N;
@@ -156,24 +160,57 @@ app.get("/reporte/bloqueante", (req: Request, res: Response) => {
     res.json({modo : "bloqueando", n, primos, duracionMs});
 });
 
-
 // Con el hilo del worker
+
 function contarPrimosenWorker(n: number): Promise<number> {
     return new Promise((resolve, reject) => {
         const archivo = path.join(__dirname, "worker-reporte.js");
         const w = new Worker(archivo, { workerData: { n } });
 
-       w.once("message",(primos:number) => { resolve(primos);});
+        w.once("message", (primos:number) => {
+            resolve(primos);
+        });
         w.once("error", reject);
+        w.once("exit", (codigo) => {
+            if (codigo !== 0) {
+                reject(new Error("Worker finalizo con codigo " + codigo));
+            }
+        });
     });
 }
 
 app.get("/reporte/worker", async (req: Request, res: Response) => {
     const n = leerN(req);
     const inicio = performance.now();
-    const primos = await contarPrimosenWorker(n);
-    const duracionMs = Math.round(performance.now() - inicio);
-    res.json({modo : "worker", n, primos, duracionMs});
+    try {
+        const primos = await contarPrimosenWorker(n);
+        const duracionMs = Math.round(performance.now() - inicio);
+        res.json({modo : "worker", n, primos, duracionMs});
+    } catch (error) {
+        res.status(500).json({error: (error as Error).message});
+    }
+});
+
+// Reporte con pool de trabajadores
+app.get("/reporte/pool", async (req: Request, res: Response) => {
+    const n = leerN(req);
+    const inicio = performance.now();
+    try {
+        const primos = await contarPrimosEnPool(n);
+        const duracionMs = Math.round(performance.now() - inicio);
+        res.json({modo: "pool", n, primos, duracionMs});
+    } catch (error) {
+        const e = error as Error;
+        if (e.name === "PoolLleno") {
+            res.setHeader("Retry-After", "1");
+            res.status(503).json({
+                error: e.message,
+                pool: estadoPool()
+            });
+            return;
+        }
+        res.status(500).json({error: e.message});
+    }
 });
 
 app.listen(PORT, () => {
