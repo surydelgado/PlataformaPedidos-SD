@@ -6,6 +6,7 @@ import{Worker} from "node:worker_threads";
 import path from "node:path";
 import {medirLatencia, resumenMetricas} from "./metricas";
 import {contarPrimosEnPool, estadoPool} from "./pool";
+import { llamar,aHttp } from "./grpc";
 
 const PORT = Number(process.env.PORT ?? 3000);
 const INVENTARIO_URL = process.env.INVENTARIO_URL ?? "http://localhost:3001";
@@ -85,6 +86,7 @@ app.get("/pedidos", (_req: Request, res: Response) => {
     res.json(pedidos);
 });
 
+/*
 // Servicio de Ingreso de Pedidos
 app.post("/pedidos", async (req: Request, res: Response) => {
     const {sku, cantidad} = req.body ?? {};
@@ -143,6 +145,44 @@ app.post("/pedidos", async (req: Request, res: Response) => {
             error: "Inventario no disponible: " + motivo,
             duracionMs
         });
+    }
+});*/
+
+// Servicio de Ingreso de Pedidos
+app.post("/pedidos", async (req: Request, res: Response) => {
+    const { sku, cantidad } = req.body ?? {};
+
+    if (typeof sku !== "string" || typeof cantidad !== "number" || cantidad <= 0) {
+        res.status(400).json({
+            error: "Solicitud inválida, se requiere sku y cantidad"
+        });
+        return;
+    }
+
+    const inicio = performance.now();
+
+    try {
+        await llamar<{ sku: string, reservado: number, restante: number }>(
+            "reservar", { sku, cantidad }
+        );
+
+        const pedido: Pedido = {
+            id: randomUUID(),
+            sku,
+            cantidad,
+            creadoen: new Date().toISOString()
+        };
+
+        pedidos.push(pedido);
+        res.status(201).json(pedido);
+
+    } catch (error) {
+        const duracionMs = Math.round(performance.now() - inicio);
+        const { status, cuerpo } = aHttp(error);
+
+        console.error("[pedidos] " + cuerpo.error + " " + cuerpo.motivo);
+
+        res.status(status).json({ ...cuerpo, duracionMs });
     }
 });
 
