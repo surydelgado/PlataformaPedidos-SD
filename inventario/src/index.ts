@@ -1,5 +1,6 @@
 
 import express, {Request, Response} from "express";
+import { iniciarGrpc } from "./grpc";
 
 const PORT = Number(process.env.PORT ?? 3001);
 const RETARDO_MS = Number(process.env.RETARDO_MS ?? 0);
@@ -9,6 +10,7 @@ const stock = new Map<string, number>([
     ["Impresora Epson", 10],
     ["Mouse", 20],
     ["MOUSE-USB", 40],
+    ["DELGADO-USB", 25],
     ["Teclado", 15],
 ]);
 
@@ -68,3 +70,5 @@ app.post("/stock/:sku/reservar", async (req: Request<{sku:string}>, res: Respons
 app.listen(PORT, () => {
     console.log(`Servicio de inventario escuchando en el puerto ${PORT} + Retardo de ${RETARDO_MS} ms`);
 });
+
+iniciarGrpc(stock,RETARDO_MS);
